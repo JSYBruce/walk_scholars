@@ -1,0 +1,65 @@
+  #Model-one layer neural network
+  def linreg(X,w,b):
+    return torch.mm(X,w)+b
+
+  #cost function:average value of square loss 
+  def squared_loss(y_hat, y): 
+    return (y_hat - y.view(y_hat.size())) ** 2 / 2
+    
+  #Gradient descent-grad parameters are available here.
+  def sgd(params, lr, batch_size): 
+    for param in params:
+        param.data -= lr * param.grad / batch_size # ues .data to operate param without gradient track
+        
+  
+  #update parameters
+  '''
+  backward function use gradient to computer new parameters
+  '''
+  for epoch in range(num_epochs):  # training repeats num_epochs times
+    # in each epoch, all the samples in dataset will be used once
+    
+    # X is the feature and y is the label of a batch sample
+    for X, y in data_iter(batch_size, features, labels):
+        l = loss(net(X, w, b), y).sum()  
+        # calculate the gradient of batch sample loss 
+        l.backward()   
+        # using small batch random gradient descent to iter model parameters
+        sgd([w, b], lr, batch_size)  
+        # reset parameter gradient
+        w.grad.data.zero_()
+        b.grad.data.zero_()
+    train_l = loss(net(features, w, b), labels)
+    print('epoch %d, loss %f' % (epoch + 1, train_l.mean().item()))
+    
+    
+    #define a model
+    class LinearNet(nn.Module):
+    def __init__(self, n_feature):
+        super(LinearNet, self).__init__()      # call father function to init 
+        self.linear = nn.Linear(n_feature, 1)  # function prototype: `torch.nn.Linear(in_features, out_features, bias=True)`
+
+    def forward(self, x):
+        y = self.linear(x)
+        return y
+        
+    net = LinearNet(num_inputs)
+    
+    # ways to init a multilayer network
+    # method one
+    net = nn.Sequential(
+        nn.Linear(num_inputs, 1)
+        # other layers can be added here
+        )
+
+    # method two
+    net = nn.Sequential()
+    net.add_module('linear', nn.Linear(num_inputs, 1))
+    
+    #parameters initialization
+    pay attention to the shape of them
+    input (n,d)
+    w (d,y)
+    b (1,y)
+    output (n,1)
+    output 
