@@ -1,0 +1,56 @@
+  #keypoint: softmax regression is one-layer neural network
+
+  #softmax function has two advantages:
+  1. range of 0 to 1
+  2. sum of the output will be 1
+  def softmax(X):
+    X_exp = X.exp()
+    partition = X_exp.sum(dim=1, keepdim=True)
+    # print("X size is ", X_exp.size())
+    # print("partition size is ", partition, partition.size())
+    return X_exp / partition  #broadcasting
+ 
+  #loss function takes cross entropy function
+    advantages:
+      1. coz every output element will be 1 or 0, we only pay attention to the true target with 1.
+  def cross_entropy(y_hat, y):
+    return - torch.log(y_hat.gather(1, y.view(-1, 1)))
+  #parameters initialization
+  W = torch.tensor(np.random.normal(0, 0.01, (num_inputs, num_outputs)), dtype=torch.float)
+  b = torch.zeros(num_outputs, dtype=torch.float)
+  
+  #model
+  def net(X):
+    return softmax(torch.mm(X.view((-1, num_inputs)), W) + b)
+    
+    
+  #update parameters
+  def train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size,
+              params=None, lr=None, optimizer=None):
+    for epoch in range(num_epochs):
+        train_l_sum, train_acc_sum, n = 0.0, 0.0, 0
+        for X, y in train_iter:
+            y_hat = net(X)
+            l = loss(y_hat, y).sum()
+            
+            # 梯度清零
+            if optimizer is not None:
+                optimizer.zero_grad()
+            elif params is not None and params[0].grad is not None:
+                for param in params:
+                    param.grad.data.zero_()
+            
+            l.backward()
+            if optimizer is None:
+                d2l.sgd(params, lr, batch_size)
+            else:
+                optimizer.step() 
+            
+            
+            train_l_sum += l.item()
+            train_acc_sum += (y_hat.argmax(dim=1) == y).sum().item()
+            n += y.shape[0]
+        test_acc = evaluate_accuracy(test_iter, net)
+        print('epoch %d, loss %.4f, train acc %.3f, test acc %.3f'
+              % (epoch + 1, train_l_sum / n, train_acc_sum / n, test_acc))
+
