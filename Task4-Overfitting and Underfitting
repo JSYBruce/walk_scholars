@@ -1,0 +1,8 @@
+#Overfitting
+1. L2 penalty
+2. dropout
+
+#underfitting
+1. more neural unit
+2. more neural layer
+3. more data
