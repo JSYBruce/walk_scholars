@@ -1,3 +1,20 @@
+#语言模型
+#给定一个序列，看这个序列是否合理，如果概率大，则该序列合理。
+#序列中的概率依次生成，第一个词的概率乘给定第一个词第二个词的概率，乘·····
+#首先需要维护一个大型语料库
+'''
+文本的概率以该词在文本中的数量除数据总量；n（w1，w2）表示第一次开始，下一个词是w2的数量
+'''
+'''
+马尔科夫假设
+在一个序列中，一个词的出现与前面n个词相关，n阶马尔科夫链。如果n=1，那么基于马尔科夫假设，P（w3|w1,w2）=P(w3|w2)。
+基于n-1阶马尔科夫链，我们可以将语言模型改写为：
+P（w1,w2,w3....wT）=累加P(wt|wt-(n-1),,,,,,wt-1)
+以上也叫n元语法。
+n元语法可能存在的缺陷：
+1. 参数空间太大 计算一个3元语法下的概率，需要V+V*2+V*3的计算量
+2. 数据稀疏   大部分数据可能都不会出现
+'''
 with open('/home/kesci/input/jaychou_lyrics4703/jaychou_lyrics.txt') as f:
     corpus_chars = f.read()
 print(len(corpus_chars))
@@ -28,15 +45,32 @@ def load_data_jay_lyrics():
     corpus_indices = [char_to_idx[char] for char in corpus_chars]
     return corpus_indices, char_to_idx, idx_to_char, vocab_size
     
-    
+
+'''
+循环神经网络，样本是一段字符，标签是这段字符的下5个字符。
+
+
+随机采样
+给定一段序列，批量大小，时间部署，长度为时间部署的分组，均分。直到最后一个不足batchsize。
+
+
+相邻采样
+'''
+
+
+
+
+
+
+
     
 import torch
 import random
-def data_iter_random(corpus_indices, batch_size, num_steps, device=None):
+def data_iter_random(corpus_indices, batch_size, num_steps, device=None):#divice控制批量放在什么设备上
     # 减1是因为对于长度为n的序列，X最多只有包含其中的前n - 1个字符
     num_examples = (len(corpus_indices) - 1) // num_steps  # 下取整，得到不重叠情况下的样本个数
     example_indices = [i * num_steps for i in range(num_examples)]  # 每个样本的第一个字符在corpus_indices中的下标
-    random.shuffle(example_indices)
+    random.shuffle(example_indices)  #随机
 
     def _data(i):
         # 返回从i开始的长为num_steps的序列
@@ -44,7 +78,7 @@ def data_iter_random(corpus_indices, batch_size, num_steps, device=None):
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    for i in range(0, num_examples, batch_size):
+    for i in range(0, num_examples, batch_size):#for循环构造随机样本，每次构造backsize的样本数量
         # 每次选出batch_size个随机样本
         batch_indices = example_indices[i: i + batch_size]  # 当前batch的各个样本的首字符的下标
         X = [_data(j) for j in batch_indices]
@@ -54,25 +88,31 @@ def data_iter_random(corpus_indices, batch_size, num_steps, device=None):
         
         
 my_seq = list(range(30))
-for X, Y in data_iter_random(my_seq, batch_size=2, num_steps=6):
+for X, Y in data_iter_random(my_seq, batch_size=2, num_steps=6):#样本长度等于6,2个批量。Y是下一个数据。
     print('X: ', X, '\nY:', Y, '\n')
     
     
     
-    
+
+'''
+相邻采样，假设批量大小3，批量三等分。在每一个部分继续根据batchsize进行划分3个。将3*3个部分堆叠起来，构造二维tensor。
+'''
 def data_iter_consecutive(corpus_indices, batch_size, num_steps, device=None):
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     corpus_len = len(corpus_indices) // batch_size * batch_size  # 保留下来的序列的长度
     corpus_indices = corpus_indices[: corpus_len]  # 仅保留前corpus_len个字符
-    indices = torch.tensor(corpus_indices, device=device)
+    indices = torch.tensor(corpus_indices, device=device) 
     indices = indices.view(batch_size, -1)  # resize成(batch_size, )
     batch_num = (indices.shape[1] - 1) // num_steps
     for i in range(batch_num):
-        i = i * num_steps
+        i = i * num_steps  #i得到第几个批量的第一个数据；
         X = indices[:, i: i + num_steps]
-        Y = indices[:, i + 1: i + num_steps + 1]
+        Y = indices[:, i + 1: i + num_steps + 1] #Y增加一个位置。
         yield X, Y
+        
+        
+  #假设batchsize2，则2个批量，每个批量2个样本。
        
        
        
