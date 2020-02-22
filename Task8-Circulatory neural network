@@ -4,14 +4,15 @@
 预测序列的下一个字符。循环神经网络引入一个隐藏变量 H，用Ht表示H在时间步t的值。 
 Ht的计算基于Xt 和Ht−1，可以认为Ht记录了到当前字符为止的序列信息，利用 HtHt 对序列的下一个字符进行预测。
 隐藏变量Ht=function(XtWxh+Ht-1Whh+bh)，其中是非线性激活函数。
+x是n*d,W是d*h的，b是1*h，H是n*h
 '''
 '''
 在时间步t，输出层的输出为：
 Ot=HtWhq+bq
-
 '''
 
 '''
+one-hot向量
 我们需要将字符表示成向量，这里采用one-hot向量。假设词典大小是 NN ，每次字符对应一个从 00 到 N−1N−1 的唯一的索引，
 则该字符的向量是一个长度为 NN 的向量，若字符的索引是 ii ，则该向量的第 ii 个位置为 11 ，其他位置为 00 。
 下面分别展示了索引为0和2的one-hot向量，向量长度等于词典大小。
@@ -28,9 +29,9 @@ import d2l_jay9460 as d2l
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def one_hot(x, n_class, dtype=torch.float32):
+def one_hot(x, n_class, dtype=torch.float32):x是数据，长度是n，n_class是，n*nclass的矩阵
     result = torch.zeros(x.shape[0], n_class, dtype=dtype, device=x.device)  # shape: (n, n_class)
-    result.scatter_(1, x.long().view(-1, 1), 1)  # result[i, x[i, 0]] = 1
+    result.scatter_(1, x.long().view(-1, 1), 1)  # result[i, x[i, 0]] = 1#scatter对于每一个行进行操作
     return result
     
 x = torch.tensor([0, 2])
@@ -39,7 +40,7 @@ print(x_one_hot)
 print(x_one_hot.shape)
 print(x_one_hot.sum(axis=1))
 
-
+#每次处理小批量一列，X小批量，n——class字典大小，长度是时间部署
 def to_onehot(X, n_class):
     return [one_hot(X[:, i], n_class) for i in range(X.shape[1])]
 
@@ -53,8 +54,10 @@ num_inputs, num_hiddens, num_outputs = vocab_size, 256, vocab_size
 # num_hiddens: h, 隐藏单元的个数是超参数
 # num_outputs: q
 
+
+#初始化模型的参数
 def get_params():
-    def _one(shape):
+    def _one(shape):#根据shape随机初始化
         param = torch.zeros(shape, device=device, dtype=torch.float32)
         nn.init.normal_(param, 0, 0.01)
         return torch.nn.Parameter(param)
@@ -70,7 +73,7 @@ def get_params():
     
  
  #定义模型
- def rnn(inputs, state, params):
+ def rnn(inputs, state, params):#input，state是一些状态的初始值-元组，现在只包括隐藏状态，参数
     # inputs和outputs皆为num_steps个形状为(batch_size, vocab_size)的矩阵
     W_xh, W_hh, b_h, W_hq, b_q = params
     H, = state
@@ -79,36 +82,35 @@ def get_params():
         H = torch.tanh(torch.matmul(X, W_xh) + torch.matmul(H, W_hh) + b_h)
         Y = torch.matmul(H, W_hq) + b_q
         outputs.append(Y)
-    return outputs, (H,)
+    return outputs, (H,) #返回output和新的新的状态H，可以作为下一个batch的初始值。
     
     
- def init_rnn_state(batch_size, num_hiddens, device):
-    return (torch.zeros((batch_size, num_hiddens), device=device), )
+ def init_rnn_state(batch_size, num_hiddens, device):#隐藏单元的设备
+    return (torch.zeros((batch_size, num_hiddens), device=device), )#形状是batch_size,num_hindden
     
- print(num_hiddens)
-print(vocab_size)
-state = init_rnn_state(X.shape[0], num_hiddens, device)
-inputs = to_onehot(X.to(device), vocab_size)
-params = get_params()
-outputs, state_new = rnn(inputs, state, params)
+print(num_hiddens) #2,5，批量为2，时间步为5
+print(vocab_size)  #
+state = init_rnn_state(X.shape[0], num_hiddens, device)#
+inputs = to_onehot(X.to(device), vocab_size)#生成one
+params = get_params()#得到模型参数
+outputs, state_new = rnn(inputs, state, params)#得到outputs和新的状态
 print(len(inputs), inputs[0].shape)
 print(len(outputs), outputs[0].shape)
-print(len(state), state[0].shape)
+print(len(state), state[0].shape)#state是元组，批量大小乘隐藏单元的个数
 print(len(state_new), state_new[0].shape)
 
-
 #裁剪梯度
-'''
+''' #幂的形式e的时间步次方
 循环神经网络中较容易出现梯度衰减或梯度爆炸，这会导致网络几乎无法训练。裁剪梯度（clip gradient）是一种应对梯度爆炸的方法。
 假设我们把所有模型参数的梯度拼接成一个向量  g ，并设裁剪的阈值是 θ 。
-min(theta/|g|,1)g
+min(theta/|g|,1)g#不超过theta
 
 '''
 def grad_clipping(params, theta, device):
     norm = torch.tensor([0.0], device=device)
     for param in params:
-        norm += (param.grad.data ** 2).sum()
-    norm = norm.sqrt().item()
+        norm += (param.grad.data ** 2).sum()#加上梯度平方和
+    norm = norm.sqrt().item()#得到g的L2
     if norm > theta:
         for param in params:
             param.grad.data *= (theta / norm)
@@ -116,27 +118,26 @@ def grad_clipping(params, theta, device):
  
  #定义预测函数
 def predict_rnn(prefix, num_chars, rnn, params, init_rnn_state,
-                num_hiddens, vocab_size, device, idx_to_char, char_to_idx):
-    state = init_rnn_state(1, num_hiddens, device)
+                num_hiddens, vocab_size, device, idx_to_char, char_to_idx):#给定参数，前缀
+    state = init_rnn_state(1, num_hiddens, device)#初始化状态
     output = [char_to_idx[prefix[0]]]   # output记录prefix加上预测的num_chars个字符
-    for t in range(num_chars + len(prefix) - 1):
+    for t in range(num_chars + len(prefix) - 1):#预测的句子的长度
         # 将上一时间步的输出作为当前时间步的输入
-        X = to_onehot(torch.tensor([[output[-1]]], device=device), vocab_size)
+        X = to_onehot(torch.tensor([[output[-1]]], device=device), vocab_size)#output最后字符作为输入
         # 计算输出和更新隐藏状态
-        (Y, state) = rnn(X, state, params)
+        (Y, state) = rnn(X, state, params)#得到当前时间的输出
         # 下一个时间步的输入是prefix里的字符或者当前的最佳预测字符
         if t < len(prefix) - 1:
             output.append(char_to_idx[prefix[t + 1]])
         else:
-            output.append(Y[0].argmax(dim=1).item())
-    return ''.join([idx_to_char[i] for i in output])
-    
+            output.append(Y[0].argmax(dim=1).item())#找到最大的可能字符
+    return ''.join([idx_to_char[i] for i in output])#对每个索引拼接起来    
     
 #困惑度
 '''
 我们通常使用困惑度（perplexity）来评价语言模型的好坏。回忆一下“softmax回归”一节中交叉熵损失函数的定义。
 困惑度是对交叉熵损失函数做指数运算后得到的值。特别地，
-
+····倒数
 最佳情况下，模型总是把标签类别的概率预测为1，此时困惑度为1；
 最坏情况下，模型总是把标签类别的概率预测为0，此时困惑度为正无穷；
 基线情况下，模型总是预测所有类别的概率都相同，此时困惑度为类别个数。
@@ -159,38 +160,38 @@ def train_and_predict_rnn(rnn, get_params, init_rnn_state, num_hiddens,
                           char_to_idx, is_random_iter, num_epochs, num_steps,
                           lr, clipping_theta, batch_size, pred_period,
                           pred_len, prefixes):
-    if is_random_iter:
+    if is_random_iter:#随机采样
         data_iter_fn = d2l.data_iter_random
     else:
-        data_iter_fn = d2l.data_iter_consecutive
-    params = get_params()
+        data_iter_fn = d2l.data_iter_consecutive# 相邻采样
+    params = get_params() #初始化模型参数
     loss = nn.CrossEntropyLoss()
 
     for epoch in range(num_epochs):
         if not is_random_iter:  # 如使用相邻采样，在epoch开始时初始化隐藏状态
-            state = init_rnn_state(batch_size, num_hiddens, device)
+            state = init_rnn_state(batch_size, num_hiddens, device)#epoch开始前初始化状态
         l_sum, n, start = 0.0, 0, time.time()
-        data_iter = data_iter_fn(corpus_indices, batch_size, num_steps, device)
-        for X, Y in data_iter:
+        data_iter = data_iter_fn(corpus_indices, batch_size, num_steps, device)#
+        for X, Y in data_iter:#data
             if is_random_iter:  # 如使用随机采样，在每个小批量更新前初始化隐藏状态
                 state = init_rnn_state(batch_size, num_hiddens, device)
-            else:  # 否则需要使用detach函数从计算图分离隐藏状态
+            else:  # 否则需要使用detach函数从计算图分离隐藏状态，减少计算量
                 for s in state:
                     s.detach_()
             # inputs是num_steps个形状为(batch_size, vocab_size)的矩阵
             inputs = to_onehot(X, vocab_size)
             # outputs有num_steps个形状为(batch_size, vocab_size)的矩阵
-            (outputs, state) = rnn(inputs, state, params)
+            (outputs, state) = rnn(inputs, state, params)#前向计算
             # 拼接之后形状为(num_steps * batch_size, vocab_size)
-            outputs = torch.cat(outputs, dim=0)
+            outputs = torch.cat(outputs, dim=0)#output矩阵拼接起来
             # Y的形状是(batch_size, num_steps)，转置后再变成形状为
             # (num_steps * batch_size,)的向量，这样跟输出的行一一对应
-            y = torch.flatten(Y.T)
+            y = torch.flatten(Y.T)#Y是矩阵
             # 使用交叉熵损失计算平均分类误差
-            l = loss(outputs, y.long())
+            l = loss(outputs, y.long())#数据类型改为long
             
             # 梯度清0
-            if params[0].grad is not None:
+            if params[0].grad is not None:#第一次反向传播，不存在梯度。
                 for param in params:
                     param.grad.data.zero_()
             l.backward()
@@ -215,29 +216,32 @@ train_and_predict_rnn(rnn, get_params, init_rnn_state, num_hiddens,
                       
                       
 #循环神经网络简介实现
-rnn_layer = nn.RNN(input_size=vocab_size, hidden_size=num_hiddens)
-num_steps, batch_size = 35, 2
-X = torch.rand(num_steps, batch_size, vocab_size)
+rnn_layer = nn.RNN(input_size=vocab_size, hidden_size=num_hiddens)#特征个数，隐藏单元个数
+num_steps, batch_size = 35, 2#时间步数，批量大小
+X = torch.rand(num_steps, batch_size, vocab_size)#字典大小是输入单元个数
 state = None
 Y, state_new = rnn_layer(X, state)
-print(Y.shape, state_new.shape)
+print(Y.shape, state_new.shape)#Y的形状 ，批量大小隐藏单元个数
 
+#batch first 决定输入的形状
+
+#forward做的是隐藏状态的计算，最后时间步的隐藏状态的值
 
 class RNNModel(nn.Module):
-    def __init__(self, rnn_layer, vocab_size):
+    def __init__(self, rnn_layer, vocab_size):#rnn_layer传入的函数
         super(RNNModel, self).__init__()
         self.rnn = rnn_layer
-        self.hidden_size = rnn_layer.hidden_size * (2 if rnn_layer.bidirectional else 1) 
+        self.hidden_size = rnn_layer.hidden_size * (2 if rnn_layer.bidirectional else 1)#双向乘2，单向1 
         self.vocab_size = vocab_size
-        self.dense = nn.Linear(self.hidden_size, vocab_size)
+        self.dense = nn.Linear(self.hidden_size, vocab_size)#线形层
 
-    def forward(self, inputs, state):
+    def forward(self, inputs, state):#forward函数，input二维tensor，state隐藏状态
         # inputs.shape: (batch_size, num_steps)
         X = to_onehot(inputs, vocab_size)
-        X = torch.stack(X)  # X.shape: (num_steps, batch_size, vocab_size)
+        X = torch.stack(X)  # X.shape: (num_steps, batch_size, vocab_size)#堆叠得到三维
         hiddens, state = self.rnn(X, state)
         hiddens = hiddens.view(-1, hiddens.shape[-1])  # hiddens.shape: (num_steps * batch_size, hidden_size)
-        output = self.dense(hiddens)
+        output = self.dense(hiddens)#输出层的计算
         return output, state
         
 
