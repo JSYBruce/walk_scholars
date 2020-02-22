@@ -1,0 +1,118 @@
+LeNet: 在大的真实数据集上的表现并不尽如⼈意。
+1.神经网络计算复杂。
+2.还没有⼤量深⼊研究参数初始化和⾮凸优化算法等诸多领域。
+
+机器学习的特征提取:手工定义的特征提取函数
+神经网络的特征提取：通过学习得到数据的多级表征，并逐级表⽰越来越抽象的概念或模式。
+
+
+class AlexNet(nn.Module):
+    def __init__(self):
+        super(AlexNet, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 96, 11, 4), # in_channels, out_channels, kernel_size, stride, padding
+            nn.ReLU(),
+            nn.MaxPool2d(3, 2), # kernel_size, stride
+            # 减小卷积窗口，使用填充为2来使得输入与输出的高和宽一致，且增大输出通道数
+            nn.Conv2d(96, 256, 5, 1, 2),
+            nn.ReLU(),
+            nn.MaxPool2d(3, 2),
+            # 连续3个卷积层，且使用更小的卷积窗口。除了最后的卷积层外，进一步增大了输出通道数。
+            # 前两个卷积层后不使用池化层来减小输入的高和宽
+            nn.Conv2d(256, 384, 3, 1, 1),
+            nn.ReLU(),
+            nn.Conv2d(384, 384, 3, 1, 1),
+            nn.ReLU(),
+            nn.Conv2d(384, 256, 3, 1, 1),
+            nn.ReLU(),
+            nn.MaxPool2d(3, 2)
+        )
+         # 这里全连接层的输出个数比LeNet中的大数倍。使用丢弃层来缓解过拟合
+        self.fc = nn.Sequential(
+            nn.Linear(256*5*5, 4096),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            #由于使用CPU镜像，精简网络，若为GPU镜像可添加该层
+            #nn.Linear(4096, 4096),
+            #nn.ReLU(),
+            #nn.Dropout(0.5),
+
+            # 输出层。由于这里使用Fashion-MNIST，所以用类别数为10，而非论文中的1000
+            nn.Linear(4096, 10),
+        )
+
+    def forward(self, img):
+
+        feature = self.conv(img)
+        output = self.fc(feature.view(img.shape[0], -1))
+        return output
+        
+  使用重复元素的网络（VGG）
+VGG：通过重复使⽤简单的基础块来构建深度模型。
+Block:数个相同的填充为1、窗口形状为 3×33×3 的卷积层,接上一个步幅为2、窗口形状为 2×22×2 的最大池化层。
+卷积层保持输入的高和宽不变，而池化层则对其减半。
+
+def vgg_block(num_convs, in_channels, out_channels): #卷积层个数，输入通道数，输出通道数
+    blk = []
+    for i in range(num_convs):
+        if i == 0:
+            blk.append(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1))
+        else:
+            blk.append(nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1))
+        blk.append(nn.ReLU())
+    blk.append(nn.MaxPool2d(kernel_size=2, stride=2)) # 这里会使宽高减半
+    return nn.Sequential(*blk)
+    
+def vgg(conv_arch, fc_features, fc_hidden_units=4096):
+    net = nn.Sequential()
+    # 卷积层部分
+    for i, (num_convs, in_channels, out_channels) in enumerate(conv_arch):
+        # 每经过一个vgg_block都会使宽高减半
+        net.add_module("vgg_block_" + str(i+1), vgg_block(num_convs, in_channels, out_channels))
+    # 全连接层部分
+    net.add_module("fc", nn.Sequential(d2l.FlattenLayer(),
+                                 nn.Linear(fc_features, fc_hidden_units),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.5),
+                                 nn.Linear(fc_hidden_units, fc_hidden_units),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.5),
+                                 nn.Linear(fc_hidden_units, 10)
+                                ))
+    return net
+    
+    
+  ⽹络中的⽹络（NiN）
+LeNet、AlexNet和VGG：先以由卷积层构成的模块充分抽取 空间特征，再以由全连接层构成的模块来输出分类结果。
+NiN：串联多个由卷积层和“全连接”层构成的小⽹络来构建⼀个深层⽹络。
+⽤了输出通道数等于标签类别数的NiN块，然后使⽤全局平均池化层对每个通道中所有元素求平均并直接⽤于分类。
+
+
+GoogLeNet
+由Inception基础块组成。
+Inception块相当于⼀个有4条线路的⼦⽹络。它通过不同窗口形状的卷积层和最⼤池化层来并⾏抽取信息，并使⽤1×1卷积层减少通道数从而降低模型复杂度。
+可以⾃定义的超参数是每个层的输出通道数，我们以此来控制模型复杂度。
+
+
+class Inception(nn.Module):
+    # c1 - c4为每条线路里的层的输出通道数
+    def __init__(self, in_c, c1, c2, c3, c4):
+        super(Inception, self).__init__()
+        # 线路1，单1 x 1卷积层
+        self.p1_1 = nn.Conv2d(in_c, c1, kernel_size=1)
+        # 线路2，1 x 1卷积层后接3 x 3卷积层
+        self.p2_1 = nn.Conv2d(in_c, c2[0], kernel_size=1)
+        self.p2_2 = nn.Conv2d(c2[0], c2[1], kernel_size=3, padding=1)
+        # 线路3，1 x 1卷积层后接5 x 5卷积层
+        self.p3_1 = nn.Conv2d(in_c, c3[0], kernel_size=1)
+        self.p3_2 = nn.Conv2d(c3[0], c3[1], kernel_size=5, padding=2)
+        # 线路4，3 x 3最大池化层后接1 x 1卷积层
+        self.p4_1 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+        self.p4_2 = nn.Conv2d(in_c, c4, kernel_size=1)
+
+    def forward(self, x):
+        p1 = F.relu(self.p1_1(x))
+        p2 = F.relu(self.p2_2(F.relu(self.p2_1(x))))
+        p3 = F.relu(self.p3_2(F.relu(self.p3_1(x))))
+        p4 = F.relu(self.p4_2(self.p4_1(x)))
+        return torch.cat((p1, p2, p3, p4), dim=1)  # 在通道维上连结输出
