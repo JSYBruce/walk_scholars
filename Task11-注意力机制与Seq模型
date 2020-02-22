@@ -1,0 +1,107 @@
+注意力机制
+在“编码器—解码器（seq2seq）”⼀节⾥，解码器在各个时间步依赖相同的背景变量（context vector）来获取输⼊序列信息。
+当编码器为循环神经⽹络时，背景变量来⾃它最终时间步的隐藏状态。将源序列输入信息以循环单位状态编码，
+然后将其传递给解码器以生成目标序列。然而这种结构存在着问题，尤其是RNN机制实际中存在长程梯度消失的问题，
+对于较长的句子，我们很难寄希望于将输入的序列转化为定长的向量而保存所有的有效信息，所以随着所需翻译句子的长度的增加，
+这种结构的效果会显著下降。
+
+与此同时，解码的目标词语可能只与原输入的部分词语有关，而并不是与所有的输入有关。
+例如，当把“Hello world”翻译成“Bonjour le monde”时，“Hello”映射成“Bonjour”，“world”映射成“monde”。在seq2seq模型中，
+解码器只能隐式地从编码器的最终状态中选择相应的信息。然而，注意力机制可以将这种选择过程显式地建模。
+
+
+注意力机制框架
+Attention 是一种通用的带权池化方法，输入由两部分构成：询问（query）和键值对（key-value pairs）。 
+ki∈Rdk,vi∈Rdv𝐤𝑖∈ℝ𝑑𝑘,𝐯𝑖∈ℝ𝑑𝑣 . Query  q∈Rdq𝐪∈ℝ𝑑𝑞  , attention layer得到输出与value的维度一致  o∈Rdv𝐨∈ℝ𝑑𝑣 . 对于一个query来说，attention layer 会与每一个key计算注意力分数并进行权重的归一化，输出的向量 oo 则是value的加权求和，而每个key计算的权重与value一一对应。
+
+为了计算输出，我们首先假设有一个函数 αα  用于计算query和key的相似性，
+然后可以计算所有的 attention scores  a1,…,ana1,…,an  by
+
+ai=α(q,ki).
+ai=α(q,ki).
+ 
+我们使用 softmax函数 获得注意力权重：
+
+b1,…,bn=softmax(a1,…,an).
+b1,…,bn=softmax(a1,…,an).
+ 
+最终的输出就是value的加权求和：
+
+o=∑i=1nbivi.
+
+
+Softmax屏蔽¶
+在深入研究实现之前，我们首先介绍softmax操作符的一个屏蔽操作。
+
+In [6]:
+def SequenceMask(X, X_len,value=-1e6):
+    maxlen = X.size(1)
+    #print(X.size(),torch.arange((maxlen),dtype=torch.float)[None, :],'\n',X_len[:, None] )
+    mask = torch.arange((maxlen),dtype=torch.float)[None, :] >= X_len[:, None]   
+    #print(mask)
+    X[mask]=value
+    return X
+    
+def masked_softmax(X, valid_length):
+    # X: 3-D tensor, valid_length: 1-D or 2-D tensor
+    softmax = nn.Softmax(dim=-1)
+    if valid_length is None:
+        return softmax(X)
+    else:
+        shape = X.shape
+        if valid_length.dim() == 1:
+            try:
+                valid_length = torch.FloatTensor(valid_length.numpy().repeat(shape[1], axis=0))#[2,2,3,3]
+            except:
+                valid_length = torch.FloatTensor(valid_length.cpu().numpy().repeat(shape[1], axis=0))#[2,2,3,3]
+        else:
+            valid_length = valid_length.reshape((-1,))
+        # fill masked elements with a large negative, whose exp is 0
+        X = SequenceMask(X.reshape((-1, shape[-1])), valid_length)
+ 
+        return softmax(X).reshape(shape)
+        
+  点积注意力
+The dot product 假设query和keys有相同的维度, 即  ∀i,q,ki∈Rd∀i,𝐪,𝐤𝑖∈ℝ𝑑 . 
+通过计算query和key转置的乘积来计算attention score,
+通常还会除去  d−−√d  减少计算出来的score对维度𝑑的依赖性，如下
+
+class DotProductAttention(nn.Module): 
+    def __init__(self, dropout, **kwargs):
+        super(DotProductAttention, self).__init__(**kwargs)
+        self.dropout = nn.Dropout(dropout)
+
+    # query: (batch_size, #queries, d)
+    # key: (batch_size, #kv_pairs, d)
+    # value: (batch_size, #kv_pairs, dim_v)
+    # valid_length: either (batch_size, ) or (batch_size, xx)
+    def forward(self, query, key, value, valid_length=None):
+        d = query.shape[-1]
+        # set transpose_b=True to swap the last two dimensions of key
+        
+        scores = torch.bmm(query, key.transpose(1,2)) / math.sqrt(d)
+        attention_weights = self.dropout(masked_softmax(scores, valid_length))
+        print("attention_weight\n",attention_weights)
+        return torch.bmm(attention_weights, value)
+        
+        
+ # Save to the d2l package.
+class MLPAttention(nn.Module):  
+    def __init__(self, units,ipt_dim,dropout, **kwargs):
+        super(MLPAttention, self).__init__(**kwargs)
+        # Use flatten=True to keep query's and key's 3-D shapes.
+        self.W_k = nn.Linear(ipt_dim, units, bias=False)
+        self.W_q = nn.Linear(ipt_dim, units, bias=False)
+        self.v = nn.Linear(units, 1, bias=False)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, query, key, value, valid_length):
+        query, key = self.W_k(query), self.W_q(key)
+        #print("size",query.size(),key.size())
+        # expand query to (batch_size, #querys, 1, units), and key to
+        # (batch_size, 1, #kv_pairs, units). Then plus them with broadcast.
+        features = query.unsqueeze(2) + key.unsqueeze(1)
+        #print("features:",features.size())  #--------------开启
+        scores = self.v(features).squeeze(-1) 
+        attention_weights = self.dropout(masked_softmax(scores, valid_length))
+        return torch.bmm(attention_weights, value)
