@@ -1,0 +1,93 @@
+Convolutional Neural Networks
+使用全连接层的局限性：
+
+图像在同一列邻近的像素在这个向量中可能相距较远。它们构成的模式可能难以被模型识别。
+对于大尺寸的输入图像，使用全连接层容易导致模型过大。
+使用卷积层的优势：
+
+卷积层保留输入形状。
+卷积层通过滑动窗口将同一卷积核与不同位置的输入重复计算，从而避免参数尺寸过大。
+
+积层块里的基本单位是卷积层后接平均池化层：卷积层用来识别图像里的空间模式，如线条和物体局部，之后的平均池化层则用来降低卷积层对位置的敏感性。
+
+卷积层块由两个这样的基本单位重复堆叠构成。在卷积层块中，每个卷积层都使用 5×55×5 的窗口，并在输出上使用sigmoid激活函数。第一个卷积层输出通道数为6，第二个卷积层输出通道数则增加到16。
+
+全连接层块含3个全连接层。它们的输出个数分别是120、84和10，其中10为输出的类别个数。
+
+
+#net
+class Flatten(torch.nn.Module):  #展平操作
+    def forward(self, x):
+        return x.view(x.shape[0], -1)
+
+class Reshape(torch.nn.Module): #将图像大小重定型
+    def forward(self, x):
+        return x.view(-1,1,28,28)      #(B x C x H x W)
+    
+net = torch.nn.Sequential(     #Lelet                                                  
+    Reshape(),
+    nn.Conv2d(in_channels=1, out_channels=6, kernel_size=5, padding=2), #b*1*28*28  =>b*6*28*28
+    nn.Sigmoid(),                                                       
+    nn.AvgPool2d(kernel_size=2, stride=2),                              #b*6*28*28  =>b*6*14*14
+    nn.Conv2d(in_channels=6, out_channels=16, kernel_size=5),           #b*6*14*14  =>b*16*10*10
+    nn.Sigmoid(),
+    nn.AvgPool2d(kernel_size=2, stride=2),                              #b*16*10*10  => b*16*5*5
+    Flatten(),                                                          #b*16*5*5   => b*400
+    nn.Linear(in_features=16*5*5, out_features=120),
+    nn.Sigmoid(),
+    nn.Linear(120, 84),
+    nn.Sigmoid(),
+    nn.Linear(84, 10)
+)
+
+#print
+X = torch.randn(size=(1,1,28,28), dtype = torch.float32)
+for layer in net:
+    X = layer(X)
+    print(layer.__class__.__name__,'output shape: \t',X.shape)
+    
+    
+# This function has been saved in the d2l package for future use
+#use GPU
+def try_gpu():
+    """If GPU is available, return torch.device as cuda:0; else return torch.device as cpu."""
+    if torch.cuda.is_available():
+        device = torch.device('cuda:0')
+    else:
+        device = torch.device('cpu')
+    return device
+
+device = try_gpu()
+device
+
+
+#训练函数
+def train_ch5(net, train_iter, test_iter,criterion, num_epochs, batch_size, device,lr=None):
+    """Train and evaluate a model with CPU or GPU."""
+    print('training on', device)
+    net.to(device)
+    optimizer = optim.SGD(net.parameters(), lr=lr)
+    for epoch in range(num_epochs):
+        train_l_sum = torch.tensor([0.0],dtype=torch.float32,device=device)
+        train_acc_sum = torch.tensor([0.0],dtype=torch.float32,device=device)
+        n, start = 0, time.time()
+        for X, y in train_iter:
+            net.train()
+            
+            optimizer.zero_grad()
+            X,y = X.to(device),y.to(device) 
+            y_hat = net(X)
+            loss = criterion(y_hat, y)
+            loss.backward()
+            optimizer.step()
+            
+            with torch.no_grad():
+                y = y.long()
+                train_l_sum += loss.float()
+                train_acc_sum += (torch.sum((torch.argmax(y_hat, dim=1) == y))).float()
+                n += y.shape[0]
+        test_acc = evaluate_accuracy(test_iter, net,device)
+        print('epoch %d, loss %.4f, train acc %.3f, test acc %.3f, '
+              'time %.1f sec'
+              % (epoch + 1, train_l_sum/n, train_acc_sum/n, test_acc,
+                 time.time() - start))
