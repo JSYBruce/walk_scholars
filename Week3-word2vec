@@ -1,4 +1,4 @@
-词嵌入基础
+词嵌入基础  词嵌入就是把预料中的词转换为空间中的向量，保留相似关系
 我们在“循环神经网络的从零开始实现”一节中使用 one-hot 向量表示单词，虽然它们构造起来很容易，但通常并不是一个好选择。
  
 由于任何两个不同词的one-hot向量的余弦相似度都为0，多个不同词之间的相似度难以通过one-hot向量准确地体现出来。
@@ -32,7 +32,7 @@ CBOW (continuous bag-of-words) 连续词袋模型：假设中心词由背景词�
 连续词袋模型关心的是，给定背景词“the”“man”“his”“son”生成中心词“loves”的条件概率。
 P(``loves"∣``the",``man",``his",``son").
 
-
+#当词频大于一个阈值时才会被丢弃，discard是随机丢弃的，这里并不是从词典中去除，而是从句子中去除。
 def discard(idx):
     '''
     @params:
@@ -61,7 +61,7 @@ def get_centers_and_contexts(dataset, max_window_size):
         max_window_size: 背景词的词窗大小的最大值
     @return:
         centers: 中心词的集合
-        contexts: 背景词窗的集合，与中心词对应，每个背景词窗则为背景词的集合
+        contexts: 背景词窗的集合，与中心词对应，每个背景词窗则为背景词的集合，集合的集合
     '''
     centers, contexts = [], []
     for st in dataset:
@@ -84,15 +84,17 @@ for center, context in zip(*get_centers_and_contexts(tiny_dataset, 2)):
     print('center', center, 'has contexts', context)
     
     
- PyTorch预置Embedding
- embed = nn.Embedding(num_embeddings=10, embedding_dim=4)
+PyTorch预置Embedding，每个词表示两个d维向量。用softmax预测词概率。 
+embed = nn.Embedding(num_embeddings=10, embedding_dim=4)
 print(embed.weight)
 
 x = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.long)
 print(embed(x))
+将输入中的张量的下标，代表向量
 
+批量乘法，第一位相同，后面点乘
 
-前向计算
+#前向计算
 def skip_gram(center, contexts_and_negatives, embed_v, embed_u):
     '''
     @params:
@@ -111,7 +113,8 @@ def skip_gram(center, contexts_and_negatives, embed_v, embed_u):
     
     
     
-  负采样
+  #负采样，softmax采样背景词过大，事实上对于不同的K条件概率并不独立，假设独立，则可以简化公式。
+  
   def get_negatives(all_contexts, sampling_weights, K):
     '''
     @params:
@@ -130,7 +133,7 @@ def skip_gram(center, contexts_and_negatives, embed_v, embed_u):
                 # 根据每个词的权重（sampling_weights）随机生成k个词的索引作为噪声词。
                 # 为了高效计算，可以将k设得稍大一点
                 i, neg_candidates = 0, random.choices(
-                    population, sampling_weights, k=int(1e5))
+                    population, sampling_weights, k=int(1e5)) #先多次采集，再挑选
             neg, i = neg_candidates[i], i + 1
             # 噪声词不能是背景词
             if neg not in set(contexts):
@@ -144,7 +147,7 @@ all_negatives = get_negatives(all_contexts, sampling_weights, 5)
 
 批量读取数据
 class MyDataset(torch.utils.data.Dataset):
-    def __init__(self, centers, contexts, negatives):
+    def __init__(self, centers, contexts, negatives):#中心词，背景词，噪音词
         assert len(centers) == len(contexts) == len(negatives)
         self.centers = centers
         self.contexts = contexts
@@ -170,12 +173,12 @@ def batchify(data):
     '''
     max_len = max(len(c) + len(n) for _, c, n in data)
     centers, contexts_negatives, masks, labels = [], [], [], []
-    for center, context, negative in data:
+    for center, context, negative in data:#枚举数据，批量组合
         cur_len = len(context) + len(negative)
         centers += [center]
-        contexts_negatives += [context + negative + [0] * (max_len - cur_len)]
+        contexts_negatives += [context + negative + [0] * (max_len - cur_len)]#标签是否是噪音
         masks += [[1] * cur_len + [0] * (max_len - cur_len)] # 使用掩码变量mask来避免填充项对损失函数计算的影响
-        labels += [[1] * len(context) + [0] * (max_len - len(context))]
+        labels += [[1] * len(context) + [0] * (max_len - len(context))]#背景词窗较小需要补齐
         batch = (torch.tensor(centers).view(-1, 1), torch.tensor(contexts_negatives),
             torch.tensor(masks), torch.tensor(labels))
     return batch
@@ -223,7 +226,7 @@ print('%.4f' % ((sigmd(1.5) + sigmd(-0.3) + sigmd(1) + sigmd(-2)) / 4)) # 注意
 print('%.4f' % ((sigmd(1.1) + sigmd(-0.6) + sigmd(-2.2)) / 3))
 
 
-
+#初始化模型，两个embedding层
 
 
 
@@ -239,7 +242,7 @@ def train(net, lr, num_epochs):
         for batch in data_iter:
             center, context_negative, mask, label = [d.to(device) for d in batch]
             
-            pred = skip_gram(center, context_negative, net[0], net[1])
+            pred = skip_gram(center, context_negative, net[0], net[1])#得到向量内机
             
             l = loss(pred.view(label.shape), label, mask).mean() # 一个batch的平均loss
             optimizer.zero_grad()
